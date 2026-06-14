@@ -27,6 +27,7 @@ CREATE TYPE plan_type       AS ENUM ('dinner', 'watch_party', 'trip', 'activity'
 CREATE TYPE plan_status     AS ENUM ('draft','collecting','options_ready','voting','decided','executed');
 CREATE TYPE rsvp_status     AS ENUM ('yes', 'maybe', 'no', 'pending');
 CREATE TYPE execution_kind  AS ENUM ('calendar', 'booking', 'payment_split');
+CREATE TYPE connection_status AS ENUM ('pending', 'accepted');
 
 -- ---------- users ---------------------------------------------------
 CREATE TABLE users (
@@ -35,6 +36,19 @@ CREATE TABLE users (
   display_name  text NOT NULL,
   created_at    timestamptz NOT NULL DEFAULT now()
 );
+
+-- ---------- connections (friends) ----------------------------------
+CREATE TABLE connections (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  requester_id  uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  addressee_id  uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status        connection_status NOT NULL DEFAULT 'pending',
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  responded_at  timestamptz,
+  UNIQUE (requester_id, addressee_id),
+  CHECK (requester_id <> addressee_id)
+);
+CREATE INDEX idx_connections_addressee ON connections(addressee_id);
 
 -- ---------- user_default_preferences (global template) -------------
 -- Pre-fills a group's prefs on create/join. Owner-only.
@@ -87,6 +101,17 @@ $$;
 -- returns booleans only — content stays owner-only via RLS. Guarded so only
 -- members of the group get rows.
 -- (defined after tables exist; see group_pref_status below)
+
+-- friendship predicate (SECURITY DEFINER to read across both users' rows).
+CREATE OR REPLACE FUNCTION app_is_friend(a uuid, b uuid) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM connections c
+    WHERE c.status = 'accepted'
+      AND ((c.requester_id = a AND c.addressee_id = b)
+        OR (c.requester_id = b AND c.addressee_id = a))
+  )
+$$;
 
 -- ---------- preferences (the trust story) --------------------------
 CREATE TABLE preferences (
@@ -208,6 +233,7 @@ CREATE TABLE executions (
 -- Row-Level Security
 -- =====================================================================
 ALTER TABLE user_default_preferences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE connections    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE groups         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE group_members  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE preferences    ENABLE ROW LEVEL SECURITY;
@@ -244,6 +270,17 @@ CREATE POLICY udp_owner_all ON user_default_preferences
   USING (user_id = app_current_user_id())
   WITH CHECK (user_id = app_current_user_id());
 
+-- connections: each party sees/manages their own rows; only the addressee accepts.
+CREATE POLICY conn_select ON connections FOR SELECT
+  USING (requester_id = app_current_user_id() OR addressee_id = app_current_user_id());
+CREATE POLICY conn_insert ON connections FOR INSERT
+  WITH CHECK (requester_id = app_current_user_id());
+CREATE POLICY conn_update ON connections FOR UPDATE
+  USING (addressee_id = app_current_user_id())
+  WITH CHECK (addressee_id = app_current_user_id());
+CREATE POLICY conn_delete ON connections FOR DELETE
+  USING (requester_id = app_current_user_id() OR addressee_id = app_current_user_id());
+
 -- groups: a member (or the creator) can read the group; any user may create a
 -- group they own. The "created_by = self" arm lets INSERT ... RETURNING see the
 -- new row before the owner's membership row exists (and is correct: a creator
@@ -261,6 +298,10 @@ CREATE POLICY gm_member_read ON group_members
   FOR SELECT USING (app_is_group_member(group_id) OR user_id = app_current_user_id());
 CREATE POLICY gm_insert_self ON group_members
   FOR INSERT WITH CHECK (user_id = app_current_user_id());
+-- a member may also add a confirmed friend directly to the group
+CREATE POLICY gm_insert_friend ON group_members
+  FOR INSERT WITH CHECK (app_is_group_member(group_id)
+                         AND app_is_friend(app_current_user_id(), user_id));
 
 -- generic group-scoped read/write for the remaining tables
 CREATE POLICY plans_member_all ON plans

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.deps import get_current_user_id, get_rls_session
 from app.core.security import create_invite_token, decode_token
+from app.schemas.connection import AddFriendToGroup
 from app.schemas.group import (
     GroupCreate,
     GroupDetail,
@@ -18,7 +19,7 @@ from app.schemas.group import (
     JoinResponse,
     MemberOut,
 )
-from app.services import group_service
+from app.services import connection_service, group_service
 
 router = APIRouter(prefix="/groups", tags=["groups"])
 settings = get_settings()
@@ -74,6 +75,26 @@ async def create_invite(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found")
     token = create_invite_token(group_id)
     return InviteOut(invite_url=f"{settings.app_base_url}/join?token={token}", token=token)
+
+
+@router.post("/{group_id}/friends", response_model=GroupDetail)
+async def add_friend(
+    group_id: UUID,
+    body: AddFriendToGroup,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_rls_session),
+) -> GroupDetail:
+    # Must be a member to add anyone (RLS also enforces this + friendship).
+    if await group_service.get_group(session, group_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found")
+    try:
+        await connection_service.add_friend_to_group(session, user_id, group_id, body.user_id)
+    except Exception as exc:  # RLS rejects non-friends
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Can only add a confirmed friend to the group",
+        ) from exc
+    return await group_detail(group_id, user_id, session)
 
 
 @router.post("/join", response_model=JoinResponse)

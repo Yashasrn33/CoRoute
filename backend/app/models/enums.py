@@ -45,3 +45,8 @@ class ExecutionKind(str, Enum):
     calendar = "calendar"
     booking = "booking"
     payment_split = "payment_split"
+
+
+class ConnectionStatus(str, Enum):
+    pending = "pending"
+    accepted = "accepted"

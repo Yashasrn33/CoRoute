@@ -5,6 +5,7 @@ helper functions, which ORM models can't express) lives in the Alembic migration
 """
 
 from app.models.enums import (
+    ConnectionStatus,
     ExecutionKind,
     MemberRole,
     PlanStatus,
@@ -13,6 +14,7 @@ from app.models.enums import (
     RsvpStatus,
 )
 from app.models.tables import (
+    Connection,
     Execution,
     Group,
     GroupMember,
@@ -34,6 +36,8 @@ __all__ = [
     "PlanStatus",
     "RsvpStatus",
     "ExecutionKind",
+    "ConnectionStatus",
+    "Connection",
     "User",
     "UserDefaultPreference",
     "Group",

@@ -22,10 +22,13 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    # Idempotent: a fresh DB already has these from docs/schema.sql via 0001.
+    op.execute("DROP POLICY IF EXISTS group_insert_self ON groups")
     op.execute(
         "CREATE POLICY group_insert_self ON groups "
         "FOR INSERT WITH CHECK (created_by = app_current_user_id())"
     )
+    op.execute("DROP POLICY IF EXISTS gm_insert_self ON group_members")
     op.execute(
         "CREATE POLICY gm_insert_self ON group_members "
         "FOR INSERT WITH CHECK (user_id = app_current_user_id())"

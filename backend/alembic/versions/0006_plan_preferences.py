@@ -19,8 +19,10 @@ down_revision: str | None = "0005"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+# Idempotent: a fresh DB creates this table from docs/schema.sql in migration 0001,
+# so guard everything to converge on both the fresh and incremental paths.
 TABLE = """
-CREATE TABLE plan_preferences (
+CREATE TABLE IF NOT EXISTS plan_preferences (
   id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   plan_id              uuid NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
   user_id              uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -36,16 +38,18 @@ CREATE TABLE plan_preferences (
   updated_at           timestamptz NOT NULL DEFAULT now(),
   UNIQUE (plan_id, user_id)
 );
-CREATE INDEX idx_plan_preferences_plan ON plan_preferences(plan_id);
+CREATE INDEX IF NOT EXISTS idx_plan_preferences_plan ON plan_preferences(plan_id);
 """
 
 POLICIES = """
 ALTER TABLE plan_preferences ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS planpref_owner_all ON plan_preferences;
 CREATE POLICY planpref_owner_all ON plan_preferences
   USING (user_id = app_current_user_id())
   WITH CHECK (user_id = app_current_user_id());
 
+DROP POLICY IF EXISTS planpref_group_read_shared ON plan_preferences;
 CREATE POLICY planpref_group_read_shared ON plan_preferences
   FOR SELECT
   USING (visibility = 'group'

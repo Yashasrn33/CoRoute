@@ -18,8 +18,9 @@ down_revision: str | None = "0006"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+# Idempotent (see 0006): a fresh DB creates this from docs/schema.sql in 0001.
 TABLE = """
-CREATE TABLE user_default_preferences (
+CREATE TABLE IF NOT EXISTS user_default_preferences (
   user_id              uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   diet                 text[] NOT NULL DEFAULT '{}',
   budget_min           integer,
@@ -35,6 +36,7 @@ CREATE TABLE user_default_preferences (
 
 POLICY = """
 ALTER TABLE user_default_preferences ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS udp_owner_all ON user_default_preferences;
 CREATE POLICY udp_owner_all ON user_default_preferences
   USING (user_id = app_current_user_id())
   WITH CHECK (user_id = app_current_user_id());

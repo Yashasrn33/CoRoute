@@ -24,6 +24,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
 from app.models.enums import (
+    ConnectionStatus,
     ExecutionKind,
     MemberRole,
     PlanStatus,
@@ -53,6 +54,7 @@ _plan_type = ENUM(PlanType, name="plan_type", create_type=False)
 _plan_status = ENUM(PlanStatus, name="plan_status", create_type=False)
 _rsvp = ENUM(RsvpStatus, name="rsvp_status", create_type=False)
 _exec_kind = ENUM(ExecutionKind, name="execution_kind", create_type=False)
+_conn_status = ENUM(ConnectionStatus, name="connection_status", create_type=False)
 
 
 class User(Base):
@@ -61,6 +63,29 @@ class User(Base):
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = _ts()
+
+
+class Connection(Base):
+    """A friendship/connection between two users (requester -> addressee).
+
+    status 'pending' until the addressee accepts. Declining/removing deletes the
+    row. Unique per ordered pair; the service collapses reverse requests.
+    """
+
+    __tablename__ = "connections"
+    __table_args__ = (UniqueConstraint("requester_id", "addressee_id"),)
+    id: Mapped[UUID] = _pk()
+    requester_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    addressee_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[ConnectionStatus] = mapped_column(
+        _conn_status, nullable=False, default=ConnectionStatus.pending
+    )
+    created_at: Mapped[datetime] = _ts()
+    responded_at: Mapped[datetime | None] = mapped_column(_TS)
 
 
 class UserDefaultPreference(Base):
