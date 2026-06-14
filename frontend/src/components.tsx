@@ -20,66 +20,58 @@ export function TopBar() {
   );
 }
 
-function GroupNav({ group }: { group: Group }) {
-  const [open, setOpen] = useState(false);
-  const [plans, setPlans] = useState<Plan[] | null>(null);
-  const loc = useLocation();
-  const nav = useNavigate();
-  const active = loc.pathname === `/groups/${group.id}`;
-
-  async function toggle() {
-    const next = !open;
-    setOpen(next);
-    if (next && plans === null) {
-      setPlans(await api.get<Plan[]>(`/groups/${group.id}/plans`).catch(() => []));
-    }
-  }
-
-  const live = (plans ?? []).filter((p) => p.status !== "executed");
-  const history = (plans ?? []).filter((p) => p.status === "executed");
-
-  return (
-    <div>
-      <div className="row" style={{ gap: 2 }}>
-        <button className="navlink ghost" style={{ width: 22, padding: 4 }} onClick={toggle}>
-          {open ? "▾" : "▸"}
-        </button>
-        <button className={`navlink ${active ? "active" : ""}`} onClick={() => nav(`/groups/${group.id}`)}>
-          {group.name}
-        </button>
-      </div>
-      {open && (
-        <div>
-          {live.map((p) => (
-            <button key={p.id} className={`navlink sub ${loc.pathname === `/plans/${p.id}` ? "active" : ""}`}
-              onClick={() => nav(`/plans/${p.id}`)}>• {p.title}</button>
-          ))}
-          {history.length > 0 && <div className="navlink sub" style={{ opacity: 0.6 }}>History</div>}
-          {history.map((p) => (
-            <button key={p.id} className={`navlink sub ${loc.pathname === `/plans/${p.id}` ? "active" : ""}`}
-              onClick={() => nav(`/plans/${p.id}`)} style={{ opacity: 0.7 }}>◦ {p.title}</button>
-          ))}
-          {plans !== null && live.length === 0 && history.length === 0 && (
-            <div className="empty">No plans yet</div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
+type PlanWithGroup = Plan & { groupName: string };
 
 export function Sidebar() {
   const [groups, setGroups] = useState<Group[]>([]);
+  const [plans, setPlans] = useState<PlanWithGroup[]>([]);
   const loc = useLocation();
-  useEffect(() => { api.get<Group[]>("/groups").then(setGroups).catch(() => {}); }, [loc.pathname]);
+  const nav = useNavigate();
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const gs = await api.get<Group[]>("/groups").catch(() => []);
+      if (cancelled) return;
+      setGroups(gs);
+      const lists = await Promise.all(
+        gs.map((g) =>
+          api.get<Plan[]>(`/groups/${g.id}/plans`)
+            .then((ps) => ps.map((p) => ({ ...p, groupName: g.name })))
+            .catch(() => [] as PlanWithGroup[])
+        )
+      );
+      if (cancelled) return;
+      const all = lists.flat().sort((a, b) => b.created_at.localeCompare(a.created_at));
+      setPlans(all);
+    })();
+    return () => { cancelled = true; };
+  }, [loc.pathname]);
+
   return (
     <aside className="sidebar">
       <NavLink to="/" end className={({ isActive }) => `navlink ${isActive ? "active" : ""}`}>
         + New group
       </NavLink>
+
       <h4>Groups</h4>
       {groups.length === 0 && <div className="empty">No groups yet</div>}
-      {groups.map((g) => <GroupNav key={g.id} group={g} />)}
+      {groups.map((g) => (
+        <button key={g.id} className={`navlink ${loc.pathname === `/groups/${g.id}` ? "active" : ""}`}
+          onClick={() => nav(`/groups/${g.id}`)}>{g.name}</button>
+      ))}
+
+      <h4>History</h4>
+      {plans.length === 0 && <div className="empty">No plans yet</div>}
+      {plans.map((p) => (
+        <button key={p.id} className={`navlink ${loc.pathname === `/plans/${p.id}` ? "active" : ""}`}
+          onClick={() => nav(`/plans/${p.id}`)} title={`${p.groupName} · ${p.status.replace("_", " ")}`}>
+          <span>{p.title}</span>
+          <span className="muted small" style={{ display: "block" }}>
+            {p.groupName} · {p.status.replace("_", " ")}
+          </span>
+        </button>
+      ))}
     </aside>
   );
 }

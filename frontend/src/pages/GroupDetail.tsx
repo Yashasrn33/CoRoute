@@ -1,13 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, connectionsApi, ConnectionPerson, GroupDetail as GD, Preference, PrefStatus, Plan } from "../api";
-import { PreferenceForm } from "./PreferenceForm";
+import { api, connectionsApi, ConnectionPerson, GroupDetail as GD, PrefStatus, Plan } from "../api";
 
 export function GroupDetail() {
   const { groupId } = useParams();
   const [group, setGroup] = useState<GD | null>(null);
   const [status, setStatus] = useState<PrefStatus | null>(null);
-  const [pref, setPref] = useState<Preference | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [invite, setInvite] = useState<string>("");
   const [friends, setFriends] = useState<ConnectionPerson[]>([]);
@@ -19,13 +17,12 @@ export function GroupDetail() {
   const [location, setLocation] = useState("");
 
   async function load() {
-    const [g, st, pr, pl] = await Promise.all([
+    const [g, st, pl] = await Promise.all([
       api.get<GD>(`/groups/${groupId}`),
       api.get<PrefStatus>(`/groups/${groupId}/preferences/status`),
-      api.get<Preference | null>(`/groups/${groupId}/preferences/me`),
       api.get<Plan[]>(`/groups/${groupId}/plans`),
     ]);
-    setGroup(g); setStatus(st); setPref(pr); setPlans(pl);
+    setGroup(g); setStatus(st); setPlans(pl);
   }
   useEffect(() => { load().catch((e) => setErr(e.message)); }, [groupId]);
   useEffect(() => { connectionsApi.list().then((c) => setFriends(c.friends)).catch(() => {}); }, [groupId]);
@@ -39,11 +36,6 @@ export function GroupDetail() {
     const res = await api.post<{ invite_url: string; token: string }>(`/groups/${groupId}/invite`);
     // For the demo we share the in-app join link with the token.
     setInvite(`${window.location.origin}/join?token=${res.token}`);
-  }
-
-  async function savePref(p: Preference) {
-    await api.put(`/groups/${groupId}/preferences/me`, p);
-    await load();
   }
 
   async function createPlan(e: React.FormEvent) {
@@ -101,27 +93,25 @@ export function GroupDetail() {
         })()}
       </div>
 
-      <div className="card">
-        <div className="spread">
-          <h2 style={{ margin: 0 }}>Your private preferences</h2>
-          {status && <span className="pill status">{status.ready}/{status.total} ready</span>}
+      {status && (
+        <div className="card">
+          <div className="spread">
+            <h2 style={{ margin: 0 }}>Preferences readiness</h2>
+            <span className="pill status">{status.ready}/{status.total} ready</span>
+          </div>
+          <p className="muted small">
+            Set your general preferences in <Link to="/profile">Profile</Link>; adjust per-plan
+            on each plan. Readiness shows existence only — never anyone's preference content.
+          </p>
+          <div className="row">
+            {status.members.map((m) => (
+              <span key={m.user_id} className={`pill ${m.has_prefs ? "yes" : ""}`}>
+                {m.display_name}: {m.has_prefs ? "set ✓" : "not set"}
+              </span>
+            ))}
+          </div>
         </div>
-        <p className="muted small">Only you can see these. The AI uses them anonymously — never attributed to you.</p>
-        <PreferenceForm initial={pref} onSave={savePref} />
-        {status && (
-          <>
-            <hr />
-            <div className="row">
-              {status.members.map((m) => (
-                <span key={m.user_id} className={`pill ${m.has_prefs ? "yes" : ""}`}>
-                  {m.display_name}: {m.has_prefs ? "set ✓" : "not set"}
-                </span>
-              ))}
-            </div>
-            <p className="muted small">Readiness shows existence only — never the content of anyone's preferences.</p>
-          </>
-        )}
-      </div>
+      )}
 
       <div className="card">
         <h2>Plans</h2>
