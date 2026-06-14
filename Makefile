@@ -31,9 +31,5 @@ seed:
 # One-time local DB bootstrap (idempotent). Requires a running Postgres you can
 # administer as a superuser (peer auth on the unix socket).
 db-roles:
-	psql -d postgres -c "DO $$$$ BEGIN \
-	  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='coroute_app') THEN CREATE ROLE coroute_app LOGIN PASSWORD 'coroute_dev' NOSUPERUSER NOBYPASSRLS; END IF; \
-	  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='coroute_reader') THEN CREATE ROLE coroute_reader LOGIN PASSWORD 'coroute_dev' NOSUPERUSER BYPASSRLS; END IF; \
-	  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='coroute_owner') THEN CREATE ROLE coroute_owner LOGIN PASSWORD 'coroute_dev' NOSUPERUSER CREATEDB; END IF; \
-	END $$$$;"
+	psql -d postgres -v ON_ERROR_STOP=1 -f scripts/roles.sql
 	psql -d postgres -tc "SELECT 1 FROM pg_database WHERE datname='coroute'" | grep -q 1 || createdb -O coroute_owner coroute
