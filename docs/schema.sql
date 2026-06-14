@@ -55,14 +55,23 @@ CREATE TABLE group_members (
 );
 CREATE INDEX idx_group_members_user ON group_members(user_id);
 
--- membership predicate reused by group-scoped policies
+-- membership predicate reused by group-scoped policies.
+-- SECURITY DEFINER: runs as the function owner (the table owner) so its internal
+-- read of group_members bypasses RLS. Without this, group_members' own RLS policy
+-- would call this function again -> infinite recursion ("stack depth exceeded").
 CREATE OR REPLACE FUNCTION app_is_group_member(gid uuid) RETURNS boolean
-LANGUAGE sql STABLE AS $$
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   SELECT EXISTS (
     SELECT 1 FROM group_members gm
     WHERE gm.group_id = gid AND gm.user_id = app_current_user_id()
   )
 $$;
+
+-- readiness helper: which members have filled prefs (EXISTENCE only, never
+-- content). SECURITY DEFINER so it can see existence across members, but it
+-- returns booleans only — content stays owner-only via RLS. Guarded so only
+-- members of the group get rows.
+-- (defined after tables exist; see group_pref_status below)
 
 -- ---------- preferences (the trust story) --------------------------
 CREATE TABLE preferences (
@@ -183,13 +192,23 @@ CREATE POLICY pref_group_read_shared ON preferences
   FOR SELECT
   USING (visibility = 'group' AND app_is_group_member(group_id));
 
--- groups: members can read; (writes handled in app/service layer with checks)
+-- groups: a member (or the creator) can read the group; any user may create a
+-- group they own. The "created_by = self" arm lets INSERT ... RETURNING see the
+-- new row before the owner's membership row exists (and is correct: a creator
+-- can always see their own group).
 CREATE POLICY group_member_read ON groups
-  FOR SELECT USING (app_is_group_member(id));
+  FOR SELECT USING (app_is_group_member(id) OR created_by = app_current_user_id());
+CREATE POLICY group_insert_self ON groups
+  FOR INSERT WITH CHECK (created_by = app_current_user_id());
 
--- group_members: a member can see the roster of their groups
+-- group_members: members see the roster; a user always sees their own membership
+-- rows (this self arm also breaks the bootstrap circularity on INSERT ...
+-- RETURNING, where "am I a member?" depends on the very row being inserted). A
+-- user may add ONLY themselves — covers creating a group and joining via invite.
 CREATE POLICY gm_member_read ON group_members
-  FOR SELECT USING (app_is_group_member(group_id));
+  FOR SELECT USING (app_is_group_member(group_id) OR user_id = app_current_user_id());
+CREATE POLICY gm_insert_self ON group_members
+  FOR INSERT WITH CHECK (user_id = app_current_user_id());
 
 -- generic group-scoped read/write for the remaining tables
 CREATE POLICY plans_member_all ON plans
@@ -215,6 +234,18 @@ CREATE POLICY outcomes_member_all ON outcomes
 CREATE POLICY executions_member_all ON executions
   USING (app_is_group_member((SELECT p.group_id FROM plans p WHERE p.id = plan_id)))
   WITH CHECK (app_is_group_member((SELECT p.group_id FROM plans p WHERE p.id = plan_id)));
+
+-- readiness helper (existence, not content). Returns one row per group member
+-- with whether they've filled preferences. Members only.
+CREATE OR REPLACE FUNCTION group_pref_status(gid uuid)
+RETURNS TABLE(user_id uuid, has_prefs boolean)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT gm.user_id,
+         EXISTS (SELECT 1 FROM preferences p
+                 WHERE p.group_id = gm.group_id AND p.user_id = gm.user_id)
+  FROM group_members gm
+  WHERE gm.group_id = gid AND app_is_group_member(gid)
+$$;
 
 -- NOTE: the AI synthesis path connects as a SEPARATE privileged reader role
 -- (BYPASSRLS) and is the only path permitted to read other members' private

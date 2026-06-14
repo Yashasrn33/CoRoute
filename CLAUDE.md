@@ -116,12 +116,16 @@ Synthesis runs **only** under the privileged reader, in `services/`, never in a 
 
 ---
 
-## Claude API usage
+## LLM provider & Claude usage
 
-- Default model for synthesis: **`claude-opus-4-8`** (best reasoning for constraint
-  satisfaction). Use **`claude-sonnet-4-6`** for cheaper iterations and
-  **`claude-haiku-4-5-20251001`** for lightweight calls. (`claude-fable-5` also available.)
-- Use **structured output via tool use** for option generation — do not parse free text.
+- `LLM_PROVIDER` selects the synthesis backend: `auto` (Claude if `ANTHROPIC_API_KEY` set,
+  else stub), `anthropic`, `ollama` (local, e.g. `phi3:mini`), or `stub` (deterministic,
+  offline). The chosen provider is part of the options cache key.
+- Default Claude model: **`claude-opus-4-8`** (best reasoning for constraint satisfaction).
+  **`claude-sonnet-4-6`** for cheaper iterations, **`claude-haiku-4-5-20251001`** for light
+  calls. (`claude-fable-5` also available.)
+- Claude path uses **structured output via tool use** — do not parse free text. The Ollama
+  path uses JSON mode (`format: "json"`) and degrades to the stub on unparseable output.
 - Use **prompt caching** for the stable parts of the system prompt.
 - **Do not memorize pricing/params.** When implementing anything LLM-shaped, consult the
   `claude-api` skill for current model IDs, pricing, token limits, streaming, and tool-use

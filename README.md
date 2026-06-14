@@ -130,5 +130,35 @@ them, the UI shows them, they don't have to be finished by Sunday.
 
 ## Getting started
 
-> _Filled in when the app scaffold lands._ For now, start at [CLAUDE.md](CLAUDE.md) for the
-> architecture and the privacy invariants any code must uphold.
+Prereqs: Python 3.11+, [uv](https://github.com/astral-sh/uv), Node 18+, a local Postgres
+on `:5432` you can administer.
+
+```bash
+# 1. Database: create roles + db, then apply migrations
+make db-roles
+cp .env.example .env          # local dev values already point at the roles below
+make migrate
+
+# 2. Backend (FastAPI on :8000)
+make api                      # or: cd backend && uv run uvicorn app.main:app --reload
+
+# 3. Frontend (Vite + React on :5173)
+cd frontend && npm install && npm run dev
+
+# 4. Tests (incl. privacy invariants)
+make test
+```
+
+Then open http://localhost:5173 — dev mode signs you in instantly (no email needed).
+
+**AI options:** without an `ANTHROPIC_API_KEY` the option generator uses a deterministic
+stub so everything runs offline. Set `ANTHROPIC_API_KEY` in `.env` to switch to real Claude
+synthesis (model `claude-opus-4-8`). See [CLAUDE.md](CLAUDE.md) for the privacy invariants
+any code must uphold.
+
+### Local roles (the privacy model in dev)
+
+`make db-roles` creates three Postgres roles so RLS is actually exercised locally:
+- `coroute_app` — RLS-subject (no BYPASSRLS); the request path connects as this.
+- `coroute_reader` — BYPASSRLS; used only by the server-side AI synthesis reader.
+- `coroute_owner` — owns tables / runs migrations.
