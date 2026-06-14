@@ -119,6 +119,26 @@ CREATE TABLE plan_attendees (
   UNIQUE (plan_id, user_id)
 );
 
+-- ---------- plan_preferences (per-plan overrides) ------------------
+-- Override a user's general preferences for a single plan. Same privacy model.
+CREATE TABLE plan_preferences (
+  id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  plan_id              uuid NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+  user_id              uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  visibility           pref_visibility NOT NULL DEFAULT 'private',
+  diet                 text[] NOT NULL DEFAULT '{}',
+  budget_min           integer,
+  budget_max           integer,
+  vibe_dislikes        text[] NOT NULL DEFAULT '{}',
+  transportation       text[] NOT NULL DEFAULT '{}',
+  hard_nos             text[] NOT NULL DEFAULT '{}',
+  accessibility_needs  text[] NOT NULL DEFAULT '{}',
+  notes                text,
+  updated_at           timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (plan_id, user_id)
+);
+CREATE INDEX idx_plan_preferences_plan ON plan_preferences(plan_id);
+
 -- ---------- options (AI-generated) ---------------------------------
 CREATE TABLE options (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -175,6 +195,7 @@ CREATE TABLE executions (
 ALTER TABLE groups         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE group_members  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE preferences    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE plan_preferences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE plans          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE plan_attendees ENABLE ROW LEVEL SECURITY;
 ALTER TABLE options        ENABLE ROW LEVEL SECURITY;
@@ -191,6 +212,16 @@ CREATE POLICY pref_owner_all ON preferences
 CREATE POLICY pref_group_read_shared ON preferences
   FOR SELECT
   USING (visibility = 'group' AND app_is_group_member(group_id));
+
+-- plan_preferences: same model, group resolved via the plan.
+CREATE POLICY planpref_owner_all ON plan_preferences
+  USING (user_id = app_current_user_id())
+  WITH CHECK (user_id = app_current_user_id());
+
+CREATE POLICY planpref_group_read_shared ON plan_preferences
+  FOR SELECT
+  USING (visibility = 'group'
+         AND app_is_group_member((SELECT p.group_id FROM plans p WHERE p.id = plan_id)));
 
 -- groups: a member (or the creator) can read the group; any user may create a
 -- group they own. The "created_by = self" arm lets INSERT ... RETURNING see the

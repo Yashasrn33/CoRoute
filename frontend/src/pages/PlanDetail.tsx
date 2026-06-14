@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, PlanDetail as PD, Option } from "../api";
+import { api, PlanDetail as PD, Option, Preference } from "../api";
+import { PreferenceForm } from "./PreferenceForm";
 
 const RSVPS = ["yes", "maybe", "no"];
 
@@ -53,6 +54,8 @@ export function PlanDetail() {
         </div>
       </div>
 
+      {!executed && <PlanPrefsCard planId={planId!} />}
+
       <div className="card">
         <div className="spread">
           <h2 style={{ margin: 0 }}>AI options</h2>
@@ -83,6 +86,59 @@ export function PlanDetail() {
       )}
 
       {err && <div className="error">{err}</div>}
+    </div>
+  );
+}
+
+const EMPTY_PREF: Preference = {
+  visibility: "private", diet: [], budget_min: null, budget_max: null,
+  vibe_dislikes: [], transportation: [], hard_nos: [], accessibility_needs: [], notes: null,
+};
+
+function PlanPrefsCard({ planId }: { planId: string }) {
+  const [pref, setPref] = useState<Preference | null>(null);
+  const [hasPref, setHasPref] = useState(false);
+  const [rationale, setRationale] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    api.get<Preference | null>(`/plans/${planId}/preferences/me`)
+      .then((p) => { setPref(p); setHasPref(!!p); })
+      .catch((e) => setErr(e.message));
+  }, [planId]);
+
+  async function suggest() {
+    setBusy(true); setErr("");
+    try {
+      const s = await api.post<any>(`/plans/${planId}/preferences/suggest`);
+      setRationale(s.rationale || "");
+      const { rationale, ...rest } = s;
+      setPref({ ...EMPTY_PREF, ...rest });
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  }
+
+  async function save(p: Preference) {
+    await api.put(`/plans/${planId}/preferences/me`, p);
+    setPref(p); setHasPref(true);
+  }
+
+  return (
+    <div className="card">
+      <div className="spread">
+        <h2 style={{ margin: 0 }}>Your preferences for this plan</h2>
+        <button className="secondary" disabled={busy} onClick={suggest}>
+          {busy ? "Thinking…" : "✨ Suggest from this plan"}
+        </button>
+      </div>
+      <p className="muted small">
+        Optional. These <b>override your general preferences for this plan only</b>, field by
+        field — anything you leave empty falls back to your profile prefs.
+        {hasPref ? "" : " You haven't set any yet (your general prefs apply)."}
+      </p>
+      {rationale && <div className="reason"><b>AI suggestion:</b> {rationale}</div>}
+      {err && <div className="error">{err}</div>}
+      <PreferenceForm initial={pref} onSave={save} />
     </div>
   );
 }

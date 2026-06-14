@@ -115,6 +115,39 @@ class Preference(Base):
     updated_at: Mapped[datetime] = _ts()
 
 
+class PlanPreference(Base):
+    """Per-user, per-plan preferences. Override the user's general (group)
+    preferences for a single plan. Same privacy model as `preferences`."""
+
+    __tablename__ = "plan_preferences"
+    __table_args__ = (UniqueConstraint("plan_id", "user_id"),)
+    id: Mapped[UUID] = _pk()
+    plan_id: Mapped[UUID] = mapped_column(
+        ForeignKey("plans.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    visibility: Mapped[PrefVisibility] = mapped_column(
+        _visibility, nullable=False, default=PrefVisibility.private
+    )
+    diet: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default="{}")
+    budget_min: Mapped[int | None] = mapped_column(Integer)
+    budget_max: Mapped[int | None] = mapped_column(Integer)
+    vibe_dislikes: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default="{}"
+    )
+    transportation: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default="{}"
+    )
+    hard_nos: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default="{}")
+    accessibility_needs: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default="{}"
+    )
+    notes: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = _ts()
+
+
 class Plan(Base):
     __tablename__ = "plans"
     id: Mapped[UUID] = _pk()

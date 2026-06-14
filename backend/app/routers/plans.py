@@ -17,7 +17,18 @@ from app.schemas.plan import (
     RsvpIn,
     VoteIn,
 )
-from app.services import group_service, plan_service, synthesis
+from app.schemas.plan_preference import (
+    PlanPreferenceIn,
+    PlanPreferenceOut,
+    PlanPreferenceSuggestion,
+)
+from app.services import (
+    group_service,
+    plan_preference_service,
+    plan_service,
+    preference_service,
+    synthesis,
+)
 
 # Plans live under a group for create/list; detail/rsvp/options are addressed by plan id.
 group_router = APIRouter(prefix="/groups/{group_id}/plans", tags=["plans"])
@@ -105,6 +116,53 @@ async def generate_options(
     plan = await _get_plan_or_404(session, plan_id)
     options = await synthesis.generate_and_store_options(session, plan)
     return [OptionOut.model_validate(o) for o in options]
+
+
+@plan_router.get("/{plan_id}/preferences/me", response_model=PlanPreferenceOut | None)
+async def get_my_plan_prefs(
+    plan_id: UUID,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_rls_session),
+) -> PlanPreferenceOut | None:
+    await _get_plan_or_404(session, plan_id)
+    pref = await plan_preference_service.get_my_plan_preference(session, plan_id, user_id)
+    return PlanPreferenceOut.model_validate(pref) if pref else None
+
+
+@plan_router.put("/{plan_id}/preferences/me", response_model=PlanPreferenceOut)
+async def put_my_plan_prefs(
+    plan_id: UUID,
+    body: PlanPreferenceIn,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_rls_session),
+) -> PlanPreferenceOut:
+    await _get_plan_or_404(session, plan_id)
+    pref = await plan_preference_service.upsert_my_plan_preference(session, plan_id, user_id, body)
+    return PlanPreferenceOut.model_validate(pref)
+
+
+@plan_router.post("/{plan_id}/preferences/suggest", response_model=PlanPreferenceSuggestion)
+async def suggest_plan_prefs(
+    plan_id: UUID,
+    user_id: UUID = Depends(get_current_user_id),
+    session: AsyncSession = Depends(get_rls_session),
+) -> PlanPreferenceSuggestion:
+    plan = await _get_plan_or_404(session, plan_id)
+    # Seed the suggestion with the caller's OWN general prefs (their data, returned
+    # only to them) so it builds on what they already set.
+    general = await preference_service.get_my_preference(session, plan.group_id, user_id)
+    general_dict = (
+        {
+            "diet": general.diet, "budget_min": general.budget_min,
+            "budget_max": general.budget_max, "vibe_dislikes": general.vibe_dislikes,
+            "transportation": general.transportation, "hard_nos": general.hard_nos,
+            "accessibility_needs": general.accessibility_needs, "notes": general.notes,
+        }
+        if general
+        else None
+    )
+    suggestion = await synthesis.suggest_plan_preferences(plan, general_dict)
+    return PlanPreferenceSuggestion.model_validate(suggestion)
 
 
 @plan_router.put("/{plan_id}/votes", response_model=PlanDetail)

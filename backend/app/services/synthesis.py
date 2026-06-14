@@ -34,57 +34,101 @@ log = get_logger("coroute.synthesis")
 _OPTIONS_CACHE: dict[str, list[dict]] = {}
 
 
-async def _build_anonymized_summary(group_id: UUID, attendee_ids: list[UUID]) -> dict:
-    """Aggregate attendee preferences into a names-free constraint summary.
+_PREF_COLS = "diet, budget_max, vibe_dislikes, transportation, hard_nos, accessibility_needs, notes"
+_ARRAY_FIELDS = ("diet", "vibe_dislikes", "transportation", "hard_nos", "accessibility_needs")
 
-    Uses the privileged synthesis reader. Returns counts/unions/bounds only.
+
+def _row_to_pref(row) -> dict:
+    diet_, budget_max, vibe_, transport_, hard_, access_, notes_ = row
+    return {
+        "diet": list(diet_ or []),
+        "budget_max": budget_max,
+        "vibe_dislikes": list(vibe_ or []),
+        "transportation": list(transport_ or []),
+        "hard_nos": list(hard_ or []),
+        "accessibility_needs": list(access_ or []),
+        "notes": notes_,
+    }
+
+
+def _override(general: dict | None, plan: dict | None) -> dict:
+    """Effective per-user pref: each field on the plan pref REPLACES the general
+    one when set (non-empty list / non-null number / non-empty notes); otherwise
+    the general value is used."""
+    g = general or {}
+    p = plan or {}
+    eff: dict = {}
+    for f in _ARRAY_FIELDS:
+        eff[f] = p[f] if p.get(f) else g.get(f, [])
+    eff["budget_max"] = p["budget_max"] if (p.get("budget_max") is not None) else g.get("budget_max")
+    eff["notes"] = (p.get("notes") or "").strip() or (g.get("notes") or "").strip() or None
+    return eff
+
+
+async def _build_anonymized_summary(
+    group_id: UUID, plan_id: UUID, attendee_ids: list[UUID]
+) -> dict:
+    """Aggregate attendees' EFFECTIVE preferences (general overridden per-field by
+    any per-plan prefs) into a names-free constraint summary.
+
+    Uses the privileged synthesis reader. Returns counts/unions/bounds only —
+    plus an anonymized list of free-text requests. No names, ever.
     """
     if SynthesisSessionLocal is None:
         raise RuntimeError(
             "DATABASE_URL_SYNTHESIS not configured — synthesis reader required."
         )
+    empty = {"party_size": 0, "respondents": 0, "diet": [], "budget_per_person_max": None,
+             "vibe_dislikes": [], "transportation": [], "hard_nos": [], "accessibility": [],
+             "additional_requests": []}
     if not attendee_ids:
-        return {"party_size": 0, "diet": [], "budget_per_person_max": None,
-                "vibe_dislikes": [], "transportation": [], "hard_nos": [],
-                "accessibility": []}
+        return empty
 
+    ids = [str(i) for i in attendee_ids]
     async with SynthesisSessionLocal() as s:
-        rows = (
-            await s.execute(
-                text(
-                    "SELECT diet, budget_max, vibe_dislikes, transportation, "
-                    "hard_nos, accessibility_needs "
-                    "FROM preferences WHERE group_id = :g AND user_id = ANY(:ids)"
-                ),
-                {"g": str(group_id), "ids": [str(i) for i in attendee_ids]},
-            )
-        ).all()
+        general_rows = (await s.execute(
+            text(f"SELECT user_id, {_PREF_COLS} FROM preferences "
+                 "WHERE group_id = :g AND user_id = ANY(:ids)"),
+            {"g": str(group_id), "ids": ids},
+        )).all()
+        plan_rows = (await s.execute(
+            text(f"SELECT user_id, {_PREF_COLS} FROM plan_preferences "
+                 "WHERE plan_id = :p AND user_id = ANY(:ids)"),
+            {"p": str(plan_id), "ids": ids},
+        )).all()
 
-    diet: set[str] = set()
-    vibe: set[str] = set()
-    transport: set[str] = set()
-    hard_nos: set[str] = set()
-    access: set[str] = set()
+    general = {r[0]: _row_to_pref(r[1:]) for r in general_rows}
+    plan = {r[0]: _row_to_pref(r[1:]) for r in plan_rows}
+
+    diet: set[str] = set(); vibe: set[str] = set(); transport: set[str] = set()
+    hard_nos: set[str] = set(); access: set[str] = set()
     budgets: list[int] = []
-    for diet_, budget_max, vibe_, transport_, hard_, access_ in rows:
-        diet.update(diet_ or [])
-        vibe.update(vibe_ or [])
-        transport.update(transport_ or [])
-        hard_nos.update(hard_ or [])
-        access.update(access_ or [])
-        if budget_max is not None:
-            budgets.append(budget_max)
+    requests: list[str] = []
+    respondents = 0
+    for uid in attendee_ids:
+        if uid not in general and uid not in plan:
+            continue
+        respondents += 1
+        eff = _override(general.get(uid), plan.get(uid))
+        diet.update(eff["diet"]); vibe.update(eff["vibe_dislikes"])
+        transport.update(eff["transportation"]); hard_nos.update(eff["hard_nos"])
+        access.update(eff["accessibility_needs"])
+        if eff["budget_max"] is not None:
+            budgets.append(eff["budget_max"])
+        if eff["notes"]:
+            requests.append(eff["notes"])
 
     return {
         "party_size": len(attendee_ids),
-        "respondents": len(rows),
+        "respondents": respondents,
         "diet": sorted(diet),
-        # The binding budget is the lowest cap across the group.
         "budget_per_person_max": min(budgets) if budgets else None,
         "vibe_dislikes": sorted(vibe),
         "transportation": sorted(transport),
         "hard_nos": sorted(hard_nos),
         "accessibility": sorted(access),
+        # Free-text per-plan requests, aggregated WITHOUT names.
+        "additional_requests": requests,
     }
 
 
@@ -270,6 +314,103 @@ async def _claude_options(summary: dict, outcomes: list[dict], plan_kind: dict) 
     raise RuntimeError("Claude did not return structured options")
 
 
+async def _chat_json(system: str, user: str, max_tokens: int = 800) -> dict:
+    """Provider-dispatched single JSON response. Raises if no chat provider."""
+    provider = settings.resolve_llm_provider()
+    if provider == "openai":
+        import httpx
+
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                f"{settings.openai_base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+                json={"model": settings.openai_model, "temperature": 0.4,
+                      "response_format": {"type": "json_object"},
+                      "messages": [{"role": "system", "content": system},
+                                   {"role": "user", "content": user}]},
+            )
+            resp.raise_for_status()
+            return json.loads(resp.json()["choices"][0]["message"]["content"])
+    if provider == "ollama":
+        import httpx
+
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(
+                f"{settings.ollama_base_url}/api/chat",
+                json={"model": settings.ollama_model, "format": "json", "stream": False,
+                      "messages": [{"role": "system", "content": system},
+                                   {"role": "user", "content": user}]},
+            )
+            resp.raise_for_status()
+            return json.loads(resp.json()["message"]["content"])
+    if provider == "anthropic":
+        from anthropic import AsyncAnthropic
+
+        client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+        msg = await client.messages.create(
+            model=settings.claude_model, max_tokens=max_tokens,
+            system=system + " Reply with ONLY valid JSON.",
+            messages=[{"role": "user", "content": user}],
+        )
+        txt = "".join(b.text for b in msg.content if b.type == "text").strip()
+        if txt.startswith("```"):
+            txt = txt.split("```")[1].lstrip("json").strip()
+        return json.loads(txt)
+    raise RuntimeError("no chat provider configured for suggestions")
+
+
+def _stub_suggestion(plan: Plan, general: dict | None) -> dict:
+    by_type = {
+        "watch_party": ("Wants a big screen with good sound to watch the match.",
+                        ["venues that won't show the game"]),
+        "dinner": ("In the mood for a relaxed sit-down dinner.", []),
+        "activity": ("Up for something active and hands-on.", []),
+        "trip": ("Prefers a calm, well-organized itinerary.", []),
+    }
+    notes, vibe = by_type.get(plan.type.value, ("No strong extra preferences for this one.", []))
+    return {**(general or {}), "vibe_dislikes": vibe, "notes": notes,
+            "rationale": f"Suggested from the {plan.type.value.replace('_', ' ')} plan (stub)."}
+
+
+async def suggest_plan_preferences(plan: Plan, general: dict | None) -> dict:
+    """Suggest per-plan preference overrides from the plan context + the user's own
+    general prefs. Returns a PlanPreferenceIn-shaped dict (+ rationale), not saved.
+    Falls back to a deterministic suggestion if no/failed model."""
+    provider = settings.resolve_llm_provider()
+    if provider == "stub":
+        return _stub_suggestion(plan, general)
+    system = (
+        "You help one person set preferences for a single group outing. Given the plan "
+        "and the person's general preferences, suggest sensible per-plan overrides for "
+        "THIS plan only. Keep their hard constraints. Reply with JSON of the form: "
+        '{"diet":[str],"budget_min":int|null,"budget_max":int|null,"vibe_dislikes":[str],'
+        '"transportation":[str],"hard_nos":[str],"accessibility_needs":[str],'
+        '"notes":str,"rationale":str}'
+    )
+    user = json.dumps({
+        "plan": {"type": plan.type.value, "title": plan.title,
+                 "location": plan.location,
+                 "scheduled_for": plan.scheduled_for.isoformat() if plan.scheduled_for else None},
+        "general_preferences": general or {},
+    })
+    try:
+        data = await _chat_json(system, user)
+    except Exception as exc:  # noqa: BLE001 — degrade gracefully
+        log.warning("plan-pref suggestion failed (%s); using stub", exc)
+        return _stub_suggestion(plan, general)
+    # Coerce to the expected shape.
+    out: dict = {}
+    for f in _ARRAY_FIELDS:
+        v = data.get(f)
+        out[f] = v if isinstance(v, list) else []
+    for f in ("budget_min", "budget_max"):
+        v = data.get(f)
+        out[f] = v if isinstance(v, int) else None
+    out["notes"] = data.get("notes") if isinstance(data.get("notes"), str) else None
+    out["rationale"] = data.get("rationale") if isinstance(data.get("rationale"), str) else None
+    return out
+
+
 async def generate_and_store_options(session: AsyncSession, plan: Plan) -> list[Option]:
     """Orchestrate synthesis and persist options on the caller's RLS session."""
     # Attendees who are coming (yes/maybe) — read on the RLS session (member-scoped).
@@ -283,7 +424,7 @@ async def generate_and_store_options(session: AsyncSession, plan: Plan) -> list[
             )
         ).scalars().all()
     )
-    summary = await _build_anonymized_summary(plan.group_id, att_ids)
+    summary = await _build_anonymized_summary(plan.group_id, plan.id, att_ids)
 
     recent = (
         await session.execute(
