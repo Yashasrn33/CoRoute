@@ -48,6 +48,14 @@ export function Sidebar() {
     return () => { cancelled = true; };
   }, [loc.pathname]);
 
+  // Groups still being planned: have an active (non-executed) plan, or are new (no plans).
+  const activeGroups = groups.filter((g) => {
+    const gp = plans.filter((p) => p.group_id === g.id);
+    return gp.length === 0 || gp.some((p) => p.status !== "executed");
+  });
+  // History: completed plans only.
+  const history = plans.filter((p) => p.status === "executed");
+
   return (
     <aside className="sidebar">
       <NavLink to="/" end className={({ isActive }) => `navlink ${isActive ? "active" : ""}`}>
@@ -55,21 +63,19 @@ export function Sidebar() {
       </NavLink>
 
       <h4>Groups</h4>
-      {groups.length === 0 && <div className="empty">No groups yet</div>}
-      {groups.map((g) => (
+      {activeGroups.length === 0 && <div className="empty">Nothing being planned</div>}
+      {activeGroups.map((g) => (
         <button key={g.id} className={`navlink ${loc.pathname === `/groups/${g.id}` ? "active" : ""}`}
           onClick={() => nav(`/groups/${g.id}`)}>{g.name}</button>
       ))}
 
       <h4>History</h4>
-      {plans.length === 0 && <div className="empty">No plans yet</div>}
-      {plans.map((p) => (
+      {history.length === 0 && <div className="empty">No completed plans</div>}
+      {history.map((p) => (
         <button key={p.id} className={`navlink ${loc.pathname === `/plans/${p.id}` ? "active" : ""}`}
           onClick={() => nav(`/plans/${p.id}`)} title={`${p.groupName} · ${p.status.replace("_", " ")}`}>
           <span>{p.title}</span>
-          <span className="muted small" style={{ display: "block" }}>
-            {p.groupName} · {p.status.replace("_", " ")}
-          </span>
+          <span className="muted small" style={{ display: "block" }}>{p.groupName}</span>
         </button>
       ))}
     </aside>
