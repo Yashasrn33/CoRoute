@@ -186,6 +186,38 @@ async def _ollama_options(summary: dict, outcomes: list[dict], plan_kind: dict) 
         return _stub_options(summary, outcomes, plan_kind)
 
 
+async def _openai_options(summary: dict, outcomes: list[dict], plan_kind: dict) -> list[dict]:
+    """Call the OpenAI (ChatGPT) API in JSON mode and parse options."""
+    import httpx
+
+    if not settings.openai_api_key:
+        raise RuntimeError("OPENAI_API_KEY not set")
+    system, user = _json_instructions(summary, outcomes, plan_kind)
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.post(
+            f"{settings.openai_base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+            json={
+                "model": settings.openai_model,
+                "temperature": 0.5,
+                "response_format": {"type": "json_object"},
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+            },
+        )
+        resp.raise_for_status()
+        content = resp.json()["choices"][0]["message"]["content"]
+    data = json.loads(content)
+    options = data.get("options") if isinstance(data, dict) else data
+    if not isinstance(options, list) or not options:
+        raise RuntimeError("OpenAI did not return an options array")
+    for i, o in enumerate(options, start=1):
+        o.setdefault("rank", i)
+    return options
+
+
 async def _claude_options(summary: dict, outcomes: list[dict], plan_kind: dict) -> list[dict]:
     """Call Claude with structured output (tool use). Imported lazily so the app
     runs without the SDK/key configured."""
@@ -275,6 +307,8 @@ async def generate_and_store_options(session: AsyncSession, plan: Plan) -> list[
     else:
         if provider == "anthropic":
             options_data = await _claude_options(summary, outcomes, plan_kind)
+        elif provider == "openai":
+            options_data = await _openai_options(summary, outcomes, plan_kind)
         elif provider == "ollama":
             options_data = await _ollama_options(summary, outcomes, plan_kind)
         else:

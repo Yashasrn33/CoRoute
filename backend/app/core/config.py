@@ -43,14 +43,19 @@ class Settings(BaseSettings):
     magic_link_ttl_minutes: int = 15
 
     # LLM provider for option synthesis.
-    #   auto  -> anthropic if a key is set, else stub
-    #   anthropic | ollama | stub  -> force that provider
+    #   auto  -> anthropic, then openai, then stub (whichever key is present)
+    #   anthropic | openai | ollama | stub  -> force that provider
     llm_provider: str = "auto"
 
     # Claude API — model IDs verified against the claude-api skill.
     anthropic_api_key: str | None = None
     claude_model: str = "claude-opus-4-8"
     claude_model_cheap: str = "claude-sonnet-4-6"
+
+    # OpenAI (ChatGPT) API. Used when llm_provider=openai.
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-4o-mini"
+    openai_base_url: str = "https://api.openai.com/v1"
 
     # Ollama (local models, e.g. phi3:mini). Used when llm_provider=ollama.
     ollama_base_url: str = "http://localhost:11434"
@@ -59,7 +64,11 @@ class Settings(BaseSettings):
     def resolve_llm_provider(self) -> str:
         if self.llm_provider != "auto":
             return self.llm_provider
-        return "anthropic" if self.anthropic_api_key else "stub"
+        if self.anthropic_api_key:
+            return "anthropic"
+        if self.openai_api_key:
+            return "openai"
+        return "stub"
 
     @property
     def is_production(self) -> bool:

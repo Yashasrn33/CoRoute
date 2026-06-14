@@ -118,9 +118,9 @@ Synthesis runs **only** under the privileged reader, in `services/`, never in a 
 
 ## LLM provider & Claude usage
 
-- `LLM_PROVIDER` selects the synthesis backend: `auto` (Claude if `ANTHROPIC_API_KEY` set,
-  else stub), `anthropic`, `ollama` (local, e.g. `phi3:mini`), or `stub` (deterministic,
-  offline). The chosen provider is part of the options cache key.
+- `LLM_PROVIDER` selects the synthesis backend: `auto` (Anthropic key → OpenAI key → stub),
+  `anthropic`, `openai` (ChatGPT, JSON mode), `ollama` (local, e.g. `phi3:mini`), or `stub`
+  (deterministic, offline). The chosen provider is part of the options cache key.
 - Default Claude model: **`claude-opus-4-8`** (best reasoning for constraint satisfaction).
   **`claude-sonnet-4-6`** for cheaper iterations, **`claude-haiku-4-5-20251001`** for light
   calls. (`claude-fable-5` also available.)
