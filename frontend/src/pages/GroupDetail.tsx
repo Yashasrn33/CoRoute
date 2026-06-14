@@ -1,0 +1,129 @@
+import { useEffect, useState } from "react";
+import { Link, useParams } from "react-router-dom";
+import { api, GroupDetail as GD, Preference, PrefStatus, Plan } from "../api";
+import { PreferenceForm } from "./PreferenceForm";
+
+export function GroupDetail() {
+  const { groupId } = useParams();
+  const [group, setGroup] = useState<GD | null>(null);
+  const [status, setStatus] = useState<PrefStatus | null>(null);
+  const [pref, setPref] = useState<Preference | null>(null);
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [invite, setInvite] = useState<string>("");
+  const [err, setErr] = useState("");
+
+  // new plan form
+  const [title, setTitle] = useState("");
+  const [type, setType] = useState("watch_party");
+  const [location, setLocation] = useState("");
+
+  async function load() {
+    const [g, st, pr, pl] = await Promise.all([
+      api.get<GD>(`/groups/${groupId}`),
+      api.get<PrefStatus>(`/groups/${groupId}/preferences/status`),
+      api.get<Preference | null>(`/groups/${groupId}/preferences/me`),
+      api.get<Plan[]>(`/groups/${groupId}/plans`),
+    ]);
+    setGroup(g); setStatus(st); setPref(pr); setPlans(pl);
+  }
+  useEffect(() => { load().catch((e) => setErr(e.message)); }, [groupId]);
+
+  async function makeInvite() {
+    const res = await api.post<{ invite_url: string; token: string }>(`/groups/${groupId}/invite`);
+    // For the demo we share the in-app join link with the token.
+    setInvite(`${window.location.origin}/join?token=${res.token}`);
+  }
+
+  async function savePref(p: Preference) {
+    await api.put(`/groups/${groupId}/preferences/me`, p);
+    await load();
+  }
+
+  async function createPlan(e: React.FormEvent) {
+    e.preventDefault();
+    if (!title.trim()) return;
+    try {
+      await api.post<Plan>(`/groups/${groupId}/plans`, { type, title, location: location || null });
+      setTitle(""); setLocation("");
+      await load();
+    } catch (e: any) { setErr(e.message); }
+  }
+
+  if (!group) return <div className="container muted">Loading…</div>;
+
+  return (
+    <div className="container">
+      <Link to="/" className="small">← All groups</Link>
+      <h1>{group.name}</h1>
+
+      <div className="card">
+        <div className="spread">
+          <h2 style={{ margin: 0 }}>Members</h2>
+          <button className="secondary" onClick={makeInvite}>Create invite link</button>
+        </div>
+        <div className="row" style={{ marginTop: 10 }}>
+          {group.members.map((m) => (
+            <span key={m.user_id} className="pill">
+              {m.display_name}{m.role === "owner" ? " ★" : ""}
+            </span>
+          ))}
+        </div>
+        {invite && (
+          <>
+            <label>Share this link (opens in-app join):</label>
+            <div className="codeblock">{invite}</div>
+          </>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="spread">
+          <h2 style={{ margin: 0 }}>Your private preferences</h2>
+          {status && <span className="pill status">{status.ready}/{status.total} ready</span>}
+        </div>
+        <p className="muted small">Only you can see these. The AI uses them anonymously — never attributed to you.</p>
+        <PreferenceForm initial={pref} onSave={savePref} />
+        {status && (
+          <>
+            <hr />
+            <div className="row">
+              {status.members.map((m) => (
+                <span key={m.user_id} className={`pill ${m.has_prefs ? "yes" : ""}`}>
+                  {m.display_name}: {m.has_prefs ? "set ✓" : "not set"}
+                </span>
+              ))}
+            </div>
+            <p className="muted small">Readiness shows existence only — never the content of anyone's preferences.</p>
+          </>
+        )}
+      </div>
+
+      <div className="card">
+        <h2>Plans</h2>
+        <form className="row" onSubmit={createPlan} style={{ marginBottom: 12 }}>
+          <input style={{ flex: 2 }} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="World Cup Final" />
+          <select style={{ flex: 1 }} value={type} onChange={(e) => setType(e.target.value)}>
+            <option value="watch_party">Watch party</option>
+            <option value="dinner">Dinner</option>
+            <option value="activity">Activity</option>
+            <option value="trip">Trip</option>
+            <option value="other">Other</option>
+          </select>
+          <input style={{ flex: 1 }} value={location} onChange={(e) => setLocation(e.target.value)} placeholder="downtown" />
+          <button>Start plan</button>
+        </form>
+        {plans.length === 0 && <p className="muted">No plans yet.</p>}
+        <div className="grid">
+          {plans.map((p) => (
+            <Link key={p.id} to={`/plans/${p.id}`} className="card spread" style={{ color: "var(--text)", marginBottom: 0 }}>
+              <span><b>{p.title}</b> <span className="muted small">· {p.type.replace("_", " ")}</span></span>
+              <span className="pill status">{p.status.replace("_", " ")}</span>
+            </Link>
+          ))}
+        </div>
+      </div>
+
+      {err && <div className="error">{err}</div>}
+    </div>
+  );
+}
