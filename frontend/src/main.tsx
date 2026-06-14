@@ -4,11 +4,13 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import "./styles.css";
 import { AuthProvider, useAuth } from "./auth";
 import { Login } from "./pages/Login";
-import { Groups } from "./pages/Groups";
+import { Home } from "./pages/Home";
 import { GroupDetail } from "./pages/GroupDetail";
 import { PlanDetail } from "./pages/PlanDetail";
 import { Join } from "./pages/Join";
-import { TopBar } from "./components";
+import { Profile } from "./pages/Profile";
+import { Connections } from "./pages/Connections";
+import { AppShell } from "./components";
 
 function Protected({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -20,13 +22,16 @@ function Protected({ children }: { children: React.ReactNode }) {
 function App() {
   return (
     <BrowserRouter>
-      <TopBar />
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/join" element={<Protected><Join /></Protected>} />
-        <Route path="/" element={<Protected><Groups /></Protected>} />
-        <Route path="/groups/:groupId" element={<Protected><GroupDetail /></Protected>} />
-        <Route path="/plans/:planId" element={<Protected><PlanDetail /></Protected>} />
+        <Route element={<Protected><AppShell /></Protected>}>
+          <Route path="/" element={<Home />} />
+          <Route path="/groups/:groupId" element={<GroupDetail />} />
+          <Route path="/plans/:planId" element={<PlanDetail />} />
+          <Route path="/profile" element={<Profile />} />
+          <Route path="/connections" element={<Connections />} />
+        </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

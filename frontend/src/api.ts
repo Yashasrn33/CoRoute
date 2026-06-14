@@ -31,6 +31,8 @@ export const api = {
   get: <T>(p: string) => req<T>("GET", p),
   post: <T>(p: string, b?: unknown) => req<T>("POST", p, b),
   put: <T>(p: string, b?: unknown) => req<T>("PUT", p, b),
+  patch: <T>(p: string, b?: unknown) => req<T>("PATCH", p, b),
+  del: <T>(p: string) => req<T>("DELETE", p),
 };
 
 // ---- Types (mirror backend schemas) ----
@@ -58,6 +60,35 @@ export interface Option {
   vote_total: number; my_score: number;
 }
 export interface PlanDetail extends Plan { attendees: Attendee[]; options: Option[]; }
+
+export interface DefaultPreference {
+  diet: string[]; budget_min: number | null; budget_max: number | null;
+  vibe_dislikes: string[]; transportation: string[]; hard_nos: string[];
+  accessibility_needs: string[]; notes: string | null;
+}
+export interface ConnectionPerson {
+  connection_id: string; user_id: string; display_name: string; email: string;
+}
+export interface Connections {
+  friends: ConnectionPerson[]; incoming: ConnectionPerson[]; outgoing: ConnectionPerson[];
+}
+
+// ---- Profile ----
+export const profileApi = {
+  updateName: (display_name: string) => api.patch<User>("/me", { display_name }),
+  getDefaults: () => api.get<DefaultPreference | null>("/me/default-preferences"),
+  putDefaults: (p: DefaultPreference) => api.put<DefaultPreference>("/me/default-preferences", p),
+};
+
+// ---- Connections ----
+export const connectionsApi = {
+  list: () => api.get<Connections>("/connections"),
+  request: (email: string) => api.post<Connections>("/connections/request", { email }),
+  accept: (id: string) => api.post<Connections>(`/connections/${id}/accept`),
+  remove: (id: string) => api.del<Connections>(`/connections/${id}`),
+  addToGroup: (groupId: string, userId: string) =>
+    api.post<GroupDetail>(`/groups/${groupId}/friends`, { user_id: userId }),
+};
 
 // ---- Auth ----
 export const auth = {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, GroupDetail as GD, Preference, PrefStatus, Plan } from "../api";
+import { api, connectionsApi, ConnectionPerson, GroupDetail as GD, Preference, PrefStatus, Plan } from "../api";
 import { PreferenceForm } from "./PreferenceForm";
 
 export function GroupDetail() {
@@ -10,6 +10,7 @@ export function GroupDetail() {
   const [pref, setPref] = useState<Preference | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [invite, setInvite] = useState<string>("");
+  const [friends, setFriends] = useState<ConnectionPerson[]>([]);
   const [err, setErr] = useState("");
 
   // new plan form
@@ -27,6 +28,12 @@ export function GroupDetail() {
     setGroup(g); setStatus(st); setPref(pr); setPlans(pl);
   }
   useEffect(() => { load().catch((e) => setErr(e.message)); }, [groupId]);
+  useEffect(() => { connectionsApi.list().then((c) => setFriends(c.friends)).catch(() => {}); }, [groupId]);
+
+  async function addFriend(userId: string) {
+    try { setGroup(await connectionsApi.addToGroup(groupId!, userId)); }
+    catch (e: any) { setErr(e.message); }
+  }
 
   async function makeInvite() {
     const res = await api.post<{ invite_url: string; token: string }>(`/groups/${groupId}/invite`);
@@ -74,6 +81,24 @@ export function GroupDetail() {
             <div className="codeblock">{invite}</div>
           </>
         )}
+        {(() => {
+          const memberIds = new Set(group.members.map((m) => m.user_id));
+          const addable = friends.filter((f) => !memberIds.has(f.user_id));
+          if (addable.length === 0) return null;
+          return (
+            <>
+              <hr />
+              <label>Add a connection to this group</label>
+              <div className="row">
+                {addable.map((f) => (
+                  <button key={f.user_id} className="secondary" onClick={() => addFriend(f.user_id)}>
+                    + {f.display_name}
+                  </button>
+                ))}
+              </div>
+            </>
+          );
+        })()}
       </div>
 
       <div className="card">
