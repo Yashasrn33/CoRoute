@@ -23,6 +23,7 @@ from app.models.tables import (
     PlanPreference,
     Preference,
     User,
+    UserDefaultPreference,
     Vote,
 )
 
@@ -34,6 +35,7 @@ __all__ = [
     "RsvpStatus",
     "ExecutionKind",
     "User",
+    "UserDefaultPreference",
     "Group",
     "GroupMember",
     "Preference",

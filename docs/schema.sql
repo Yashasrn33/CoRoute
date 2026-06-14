@@ -36,6 +36,21 @@ CREATE TABLE users (
   created_at    timestamptz NOT NULL DEFAULT now()
 );
 
+-- ---------- user_default_preferences (global template) -------------
+-- Pre-fills a group's prefs on create/join. Owner-only.
+CREATE TABLE user_default_preferences (
+  user_id              uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  diet                 text[] NOT NULL DEFAULT '{}',
+  budget_min           integer,
+  budget_max           integer,
+  vibe_dislikes        text[] NOT NULL DEFAULT '{}',
+  transportation       text[] NOT NULL DEFAULT '{}',
+  hard_nos             text[] NOT NULL DEFAULT '{}',
+  accessibility_needs  text[] NOT NULL DEFAULT '{}',
+  notes                text,
+  updated_at           timestamptz NOT NULL DEFAULT now()
+);
+
 -- ---------- groups --------------------------------------------------
 CREATE TABLE groups (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -192,6 +207,7 @@ CREATE TABLE executions (
 -- =====================================================================
 -- Row-Level Security
 -- =====================================================================
+ALTER TABLE user_default_preferences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE groups         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE group_members  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE preferences    ENABLE ROW LEVEL SECURITY;
@@ -222,6 +238,11 @@ CREATE POLICY planpref_group_read_shared ON plan_preferences
   FOR SELECT
   USING (visibility = 'group'
          AND app_is_group_member((SELECT p.group_id FROM plans p WHERE p.id = plan_id)));
+
+-- user_default_preferences: owner-only (the user's own template).
+CREATE POLICY udp_owner_all ON user_default_preferences
+  USING (user_id = app_current_user_id())
+  WITH CHECK (user_id = app_current_user_id());
 
 -- groups: a member (or the creator) can read the group; any user may create a
 -- group they own. The "created_by = self" arm lets INSERT ... RETURNING see the

@@ -63,6 +63,31 @@ class User(Base):
     created_at: Mapped[datetime] = _ts()
 
 
+class UserDefaultPreference(Base):
+    """A user's global default preferences template. Pre-fills a group's prefs
+    when they create or join a group. Owner-only (the user's own data)."""
+
+    __tablename__ = "user_default_preferences"
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    diet: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default="{}")
+    budget_min: Mapped[int | None] = mapped_column(Integer)
+    budget_max: Mapped[int | None] = mapped_column(Integer)
+    vibe_dislikes: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default="{}"
+    )
+    transportation: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default="{}"
+    )
+    hard_nos: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default="{}")
+    accessibility_needs: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default="{}"
+    )
+    notes: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = _ts()
+
+
 class Group(Base):
     __tablename__ = "groups"
     id: Mapped[UUID] = _pk()

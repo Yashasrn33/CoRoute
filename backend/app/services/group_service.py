@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Group, GroupMember, User
 from app.models.enums import MemberRole
+from app.services import profile_service
 
 
 async def create_group(session: AsyncSession, name: str, owner_id: UUID) -> Group:
@@ -20,6 +21,8 @@ async def create_group(session: AsyncSession, name: str, owner_id: UUID) -> Grou
     await session.flush()  # get group.id
     session.add(GroupMember(group_id=group.id, user_id=owner_id, role=MemberRole.owner))
     await session.flush()
+    # Seed the owner's group prefs from their default template, if any.
+    await profile_service.apply_template_to_group(session, group.id, owner_id)
     return group
 
 
@@ -66,4 +69,6 @@ async def join_group(session: AsyncSession, group_id: UUID, user_id: UUID) -> bo
         return False
     session.add(GroupMember(group_id=group_id, user_id=user_id, role=MemberRole.member))
     await session.flush()
+    # Seed the joiner's group prefs from their default template, if any.
+    await profile_service.apply_template_to_group(session, group_id, user_id)
     return True

@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
-from app.routers import auth, groups, plans, preferences
+from app.routers import auth, groups, plans, preferences, profile
 
 settings = get_settings()
 log = get_logger("coroute")
@@ -34,6 +34,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(groups.router)
+app.include_router(profile.router)
 app.include_router(preferences.router)
 app.include_router(plans.group_router)
 app.include_router(plans.plan_router)
